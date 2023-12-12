@@ -48,6 +48,7 @@
 #include <utils/Trace.h>
 #include <utils/Timers.h>
 #include <cutils/properties.h>
+#include <android-base/properties.h>
 
 #include <aidl/android/hardware/camera/device/ICameraInjectionSession.h>
 #include <aidlcommonsupport/NativeHandle.h>
@@ -212,10 +213,22 @@ status_t AidlCamera3Device::initialize(sp<CameraProviderManager> manager,
                     physicalId, /*overrideForPerfClass*/false, &mPhysicalDeviceInfoMap[physicalId],
                     mOverrideToPortrait);
             if (res != OK) {
-                SET_ERR_L("Could not retrieve camera %s characteristics: %s (%d)",
-                        physicalId.c_str(), strerror(-res), res);
-                session->close();
-                return res;
+                auto fallbackId = base::GetProperty(
+                        "persist.sys.camera.fallback_id_" + physicalId, "");
+                if (!fallbackId.empty()) {
+                    CLOGW("Could not retrieve camera %s characteristics: %s (%d)",
+                            physicalId.c_str(), strerror(-res), res);
+                    CLOGW("Trying fallback camera %s", fallbackId.c_str());
+                    res = manager->getCameraCharacteristics(
+                            fallbackId, /*overrideForPerfClass*/false,
+                            &mPhysicalDeviceInfoMap[fallbackId], /*overrideToPortrait*/true);
+                }
+                if (res != OK) {
+                    SET_ERR_L("Could not retrieve camera %s characteristics: %s (%d)",
+                            physicalId.c_str(), strerror(-res), res);
+                    session->close();
+                    return res;
+                }
             }
 
             bool usePrecorrectArray =
